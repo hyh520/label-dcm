@@ -5,7 +5,7 @@ from PyQt5.QtCore import QPointF, QRectF
 
 
 def getIndexShift(A: QPointF):
-    return QPointF(A.x() * (1 + settings.shifting), A.y() * (1 - settings.shifting))
+    return QPointF(A.x() + settings.indexShifting, A.y() - settings.indexShifting)
 
 
 def getMidpoint(A: QPointF, B: QPointF):
@@ -13,17 +13,18 @@ def getMidpoint(A: QPointF, B: QPointF):
 
 
 def getDistance(A: QPointF, B: QPointF):
-    return ((A.x() - B.x()) * (A.x() - B.x()) + (A.y() - B.y()) * (A.y() - B.y())) ** 0.5
+    distance = ((A.x() - B.x()) * (A.x() - B.x()) + (A.y() - B.y()) * (A.y() - B.y())) ** 0.5
+    return distance if distance > settings.eps else settings.eps
 
 
 def getDistanceShift(A: QPointF, B: QPointF, C: QPointF):
     if math.fabs(A.x() - B.x()) < settings.eps:
-        return QPointF(C.x() * (1 + settings.shifting), C.y())
+        return QPointF(C.x() + settings.distanceShifting, C.y())
     if math.fabs(A.y() - B.y()) < settings.eps:
-        return QPointF(C.x(), C.y() * (1 - settings.shifting))
+        return QPointF(C.x(), C.y() - settings.distanceShifting)
     if (A.x() - B.x()) * (A.y() - B.y()) < 0:
-        return QPointF(C.x() * (1 + settings.shifting), C.y() * (1 + settings.shifting))
-    return QPointF(C.x() * (1 + settings.shifting), C.y() * (1 - settings.shifting))
+        return QPointF(C.x() + settings.distanceShifting, C.y() + settings.distanceShifting)
+    return QPointF(C.x() + settings.distanceShifting, C.y() - settings.distanceShifting)
 
 
 def getRadius(A: QPointF, B: QPointF, C: QPointF):
@@ -61,7 +62,7 @@ def getCross(A: QPointF, B: QPointF, C: QPointF):
 
 
 def getDegree(A: QPointF, B: QPointF, C: QPointF):
-    return math.degrees(math.acos(getDot(A, B, C) / getDistance(B, A) / getDistance(B, C)))
+    return math.degrees(math.acos(min(1, max(-1, getDot(A, B, C) / getDistance(B, A) / getDistance(B, C)))))
 
 
 def getBeginDegree(A: QPointF, B: QPointF, C: QPointF):
@@ -71,21 +72,29 @@ def getBeginDegree(A: QPointF, B: QPointF, C: QPointF):
 
 
 def getDegreeShift(A: QPointF, B: QPointF):
-    if A.x() + settings.eps < B.x() and math.fabs(A.y() - B.y()) < settings.eps:
-        return QPointF(B.x() * (1 + settings.shifting), B.y())
-    if A.x() + settings.eps < B.x() and A.y() > B.y() + settings.eps:
-        return QPointF(B.x() * (1 + settings.shifting), B.y() * (1 - settings.shifting))
+    # Up
     if A.y() > B.y() + settings.eps and math.fabs(A.x() - B.x()) < settings.eps:
-        return QPointF(B.x(), B.y() * (1 - settings.shifting))
-    if A.x() > B.x() + settings.eps and A.y() > B.y() + settings.eps:
-        return QPointF(B.x() * (1 - settings.shiftingMore), B.y() * (1 - settings.shifting))
-    if A.x() > B.x() + settings.eps and math.fabs(A.y() - B.y()) < settings.eps:
-        return QPointF(B.x() * (1 - settings.shiftingMore), B.y())
-    if A.x() > B.x() + settings.eps and A.y() + settings.eps < B.y():
-        return QPointF(B.x() * (1 - 12 * settings.shifting), B.y() * (1 + 4 * settings.shifting))
+        return QPointF(B.x(), B.y() - settings.degreeShiftingBase)
+    # Down
     if A.y() + settings.eps < B.y() and math.fabs(A.x() - B.x()) < settings.eps:
-        return QPointF(B.x(), B.y() * (1 + settings.shifting))
-    return QPointF(B.x() * (1 + settings.shifting), B.y() * (1 + settings.shifting))
+        return QPointF(B.x(), B.y() + settings.degreeShiftingBase)
+    # Left
+    if A.x() > B.x() + settings.eps and math.fabs(A.y() - B.y()) < settings.eps:
+        return QPointF(B.x() - settings.degreeShiftingMore, B.y())
+    # Right
+    if A.x() + settings.eps < B.x() and math.fabs(A.y() - B.y()) < settings.eps:
+        return QPointF(B.x() + settings.degreeShiftingBase, B.y())
+    # Top Right
+    if A.x() + settings.eps < B.x() and A.y() > B.y() + settings.eps:
+        return QPointF(B.x() + settings.degreeShiftingBase, B.y() - settings.degreeShiftingBase)
+    # Top Left
+    if A.x() > B.x() + settings.eps and A.y() > B.y() + settings.eps:
+        return QPointF(B.x() - settings.degreeShiftingMore, B.y() - settings.degreeShiftingBase)
+    # Bottom Left
+    if A.x() > B.x() + settings.eps and A.y() + settings.eps < B.y():
+        return QPointF(B.x() - settings.degreeShiftingMore, B.y() + settings.degreeShiftingBase)
+    # Bottom Right
+    return QPointF(B.x() + settings.degreeShiftingBase, B.y() + settings.degreeShiftingBase)
 
 
 def getMinBoundingRect(A: QPointF, B: QPointF):
@@ -140,12 +149,10 @@ def getDcmImgAndMdInfo(imgDir: str):
 # SystemDrive:\HomePath\Pictures\
 def getHomeImgDir():
     homeImgDir = os.getcwd()
-    sysDriver = os.getenv('SystemDrive')
-    if sysDriver:
+    if sysDriver := os.getenv('SystemDrive'):
         homeImgDir = sysDriver
-        homePath = os.getenv('HomePath')
-        if homePath:
-            homeImgDir += homePath + r'\Pictures\\'
+        if homePath := os.getenv('HomePath'):
+            homeImgDir = os.path.join(homeImgDir, homePath, 'Pictures')
     return homeImgDir
 
 
@@ -155,3 +162,16 @@ def getLineKey(indexA: int, indexB: int):
 
 def getAngleKey(indexA: int, indexB: int, indexC: int):
     return (indexA, indexB, indexC) if indexA < indexC else (indexC, indexB, indexA)
+
+
+def isOnALine(A: QPointF, B: QPointF, C: QPointF):
+    return math.fabs((A.x() - C.x()) * (A.y() - B.y()) - (A.x() - B.x()) * (A.y() - C.y())) < settings.eps
+
+
+# AB: ax + by + c = 0
+def getFootPoint(A: QPointF, B: QPointF, C: QPointF):
+    a = A.y() - B.y()
+    b = B.x() - A.x()
+    c = -a * A.x() - b * A.y()
+    return QPointF((b * b * C.x() - a * b * C.y() - a * c) / (a * a + b * b),
+                   (a * a * C.y() - a * b * C.x() - b * c) / (a * a + b * b))

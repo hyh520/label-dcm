@@ -24,10 +24,10 @@ class LabelApp(QWidget, Ui_Form):
 
     # TODO: Init UI style
     def initUIStyle(self):
+        pass
         # Example
         # self.setWindowTitle('LabelDcm')
         # self.setStyleSheet('QWidget { color: gray }')
-        pass
 
     def initEventConnections(self):
         self.imgView.viewport().installEventFilter(self)
@@ -93,8 +93,6 @@ class LabelApp(QWidget, Ui_Form):
         # Init Highlight
         self.highlightMoveIndex = -1
         self.highlightPoints: Set[int] = set()
-        self.highlightLine: Optional[Tuple[int, int]] = None
-        self.highlightCircle: Optional[Tuple[int, int]] = None
 
         if settings.debug:
             self.test()
@@ -114,8 +112,6 @@ class LabelApp(QWidget, Ui_Form):
     def initHighlight(self):
         self.highlightMoveIndex = -1
         self.highlightPoints.clear()
-        self.highlightLine = None
-        self.highlightCircle = None
 
     def initExceptImg(self):
         self.initIndex()
@@ -202,7 +198,8 @@ class LabelApp(QWidget, Ui_Form):
             font.setPointSizeF(settings.fontSize)
         painter.setFont(font)
         for (indexA, indexB), color in self.lines.items():
-            pen.setColor(color if (indexA, indexB) != self.highlightLine else QColor.lighter(color))
+            pen.setColor(QColor.lighter(color) if indexA in self.highlightPoints and indexB in self.highlightPoints
+                         else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
             B = self.points[indexB][0]
@@ -268,7 +265,8 @@ class LabelApp(QWidget, Ui_Form):
         pen.setCapStyle(Qt.RoundCap)
         pen.setWidthF(settings.lineWidth if not toSrc else settings.lineWidth * self.ratioToSrc)
         for (indexA, indexB), color in self.circles.items():
-            pen.setColor(color if (indexA, indexB) != self.highlightCircle else QColor.lighter(color))
+            pen.setColor(QColor.lighter(color) if indexA in self.highlightPoints and indexB in self.highlightPoints
+                         else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
             B = self.points[indexB][0]
@@ -331,10 +329,9 @@ class LabelApp(QWidget, Ui_Form):
         self.pivots.discard(index)
 
     def eraseHighlight(self):
-        if self.mode == LabelMode.CircleMode or self.mode == LabelMode.VerticalMode:
+        if self.mode == LabelMode.CircleMode:
             self.erasePoint(self.indexA)
             self.erasePoint(self.indexB)
-            self.erasePoint(self.indexC)
         self.initIndex()
         self.initHighlight()
         self.updateAll()
@@ -393,6 +390,12 @@ class LabelApp(QWidget, Ui_Form):
         if self.img and index > -1:
             self.points[index] = self.getImgPoint(QPointF(x, y)), self.color
 
+    def getNewIndex(self):
+        return max(self.points.keys() if self.points else [0]) + 1
+
+    def addNewRealPoint(self, x: float, y: float):
+        self.addRealPoint(self.getNewIndex(), x, y)
+
     # TODO: Init image with points
     def initImgWithPoints(self):
         if not self.img:
@@ -400,6 +403,7 @@ class LabelApp(QWidget, Ui_Form):
         self.initExceptImg()
         # Example
         # self.addRealPoint(1, 300, 200)
+        # self.addNewRealPoint(300, 300)
         self.updateAll()
 
     def toMode(self, mode: LabelMode):
@@ -427,17 +431,24 @@ class LabelApp(QWidget, Ui_Form):
                 index = idx
         return index
 
-    def addIndex(self, index: int):
+    def isPointOutOfBound(self, point: QPointF):
+        return point.x() < settings.pointWidth / 2 or point.x() > self.img.width() - settings.pointWidth / 2 or \
+               point.y() < settings.pointWidth / 2 or point.y() > self.img.height() - settings.pointWidth / 2
+
+    def getIndexCnt(self):
+        return len([i for i in [self.indexA, self.indexB, self.indexC] if i != -1])
+
+    def triggerIndex(self, index: int):
         if not self.img or not self.points or index == -1:
             return None
         if index in [self.indexA, self.indexB, self.indexC]:
-            indexs = [_ for _ in [self.indexA, self.indexB, self.indexC] if _ != index]
+            indexs = [i for i in [self.indexA, self.indexB, self.indexC] if i != index]
             self.indexA = indexs[0]
             self.indexB = indexs[1]
             self.indexC = -1
             self.highlightPoints.remove(index)
         else:
-            indexs = [_ for _ in [self.indexA, self.indexB, self.indexC] if _ != -1]
+            indexs = [i for i in [self.indexA, self.indexB, self.indexC] if i != -1]
             indexs.append(index)
             while len(indexs) < 3:
                 indexs.append(-1)
@@ -446,12 +457,19 @@ class LabelApp(QWidget, Ui_Form):
             self.indexC = indexs[2]
             self.highlightPoints.add(index)
 
-    def getIndexCnt(self):
-        return len([_ for _ in [self.indexA, self.indexB, self.indexC] if _ != -1])
+    def endTrigger(self):
+        self.initIndex()
+        self.initHighlight()
 
-    def addPoint(self, index: int, x: float, y: float):
-        if self.img and index > -1:
-            self.points[index] = QPointF(x, y), self.color
+    def endTriggerWith(self, index: int):
+        self.endTrigger()
+        self.highlightMoveIndex = index
+
+    def addPoint(self, point: QPointF):
+        if self.img:
+            index = self.getNewIndex()
+            self.points[index] = point, self.color
+            return index
 
     def addLine(self, indexA: int, indexB: int):
         if self.img and indexA in self.points and indexB in self.points:
@@ -466,28 +484,100 @@ class LabelApp(QWidget, Ui_Form):
         if self.img and indexA in self.points and indexB in self.points:
             self.circles[(indexA, indexB)] = self.color
 
-    # TODO: Handle events about imgView
-
     def handleDragMode(self, evt: QMouseEvent):
-        pass
+        point = self.imgView.mapToScene(evt.pos())
+        if evt.type() == QMouseEvent.MouseButtonPress and self.getIndexCnt() == 0:
+            self.triggerIndex(self.getPointIndex(point))
+        elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 1 and not self.isPointOutOfBound(point):
+            self.points[self.indexA][0].setX(point.x())
+            self.points[self.indexA][0].setY(point.y())
+        elif evt.type() == QMouseEvent.MouseButtonRelease and self.getIndexCnt() == 1:
+            self.triggerIndex(self.indexA)
 
     def handlePointMode(self, evt: QMouseEvent):
-        pass
+        if evt.type() != QMouseEvent.MouseButtonPress:
+            return None
+        point = self.imgView.mapToScene(evt.pos())
+        index = self.getPointIndex(point)
+        if index != -1:
+            self.points[index] = self.points[index][0], self.color
+        else:
+            self.addPoint(point)
 
     def handleLineMode(self, evt: QMouseEvent):
-        pass
+        if evt.type() != QMouseEvent.MouseButtonPress:
+            return None
+        self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
+        if self.getIndexCnt() == 2:
+            self.addLine(self.indexA, self.indexB)
+            self.endTriggerWith(self.indexB)
 
     def handleAngleMode(self, evt: QMouseEvent):
-        pass
+        if evt.type() != QMouseEvent.MouseButtonPress:
+            return None
+        self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
+        if self.getIndexCnt() == 2 and Static.getLineKey(self.indexA, self.indexB) not in self.lines:
+            self.triggerIndex(self.indexA)
+        elif self.getIndexCnt() == 3:
+            if Static.getLineKey(self.indexB, self.indexC) in self.lines:
+                self.addAngle(self.indexA, self.indexB, self.indexC)
+                self.endTriggerWith(self.indexC)
+            else:
+                indexC = self.indexC
+                self.endTrigger()
+                self.triggerIndex(indexC)
 
     def handleCircleMode(self, evt: QMouseEvent):
-        pass
+        point = self.imgView.mapToScene(evt.pos())
+        if evt.type() == QMouseEvent.MouseButtonPress:
+            if self.getIndexCnt() == 0:
+                self.triggerIndex(self.addPoint(point))
+                self.triggerIndex(self.addPoint(QPointF(point.x() + 2 * settings.eps, point.y() + 2 * settings.eps)))
+                self.addCircle(self.indexA, self.indexB)
+            elif self.getIndexCnt() == 2:
+                self.endTriggerWith(self.indexB)
+        elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 2 and not self.isPointOutOfBound(point):
+            self.points[self.indexB][0].setX(point.x())
+            self.points[self.indexB][0].setY(point.y())
 
     def handleMidpointMode(self, evt: QMouseEvent):
-        pass
+        if evt.type() != QMouseEvent.MouseButtonPress:
+            return None
+        self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
+        if self.getIndexCnt() == 2:
+            if Static.getLineKey(self.indexA, self.indexB) in self.lines:
+                A = self.points[self.indexA][0]
+                B = self.points[self.indexB][0]
+                self.addPoint(Static.getMidpoint(A, B))
+                self.endTriggerWith(self.indexB)
+            else:
+                self.triggerIndex(self.indexA)
 
     def handleVerticalMode(self, evt: QMouseEvent):
-        pass
+        if evt.type() != QMouseEvent.MouseButtonPress:
+            return None
+        self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
+        if self.getIndexCnt() == 2:
+            if Static.getLineKey(self.indexA, self.indexB) not in self.lines:
+                self.triggerIndex(self.indexA)
+        elif self.getIndexCnt() == 3:
+            A = self.points[self.indexA][0]
+            B = self.points[self.indexB][0]
+            C = self.points[self.indexC][0]
+            if Static.isOnALine(A, B, C):
+                if Static.getLineKey(self.indexB, self.indexC) in self.lines:
+                    self.triggerIndex(self.indexA)
+                else:
+                    indexC = self.indexC
+                    self.endTrigger()
+                    self.triggerIndex(indexC)
+            else:
+                D = Static.getFootPoint(A, B, C)
+                indexD = self.addPoint(D)
+                self.addLine((self.indexA if Static.getDistance(A, D) < Static.getDistance(B, D) else self.indexB),
+                             indexD)
+                self.addLine(self.indexC, indexD)
+                self.endTriggerWith(self.indexC)
 
     def handleHighlightMove(self, evt: QMouseEvent):
         self.highlightMoveIndex = self.getPointIndex(self.imgView.mapToScene(evt.pos()))
@@ -588,15 +678,15 @@ class LabelApp(QWidget, Ui_Form):
 
     # Debug Test
     def test(self):
-        self.loadImg(r'C:\Users\Makise Von\Pictures\test.jpg')
-        self.addRealPoint(1, 300, 200)
-        self.addRealPoint(2, 200, 200)
-        self.addRealPoint(3, 300, 300)
-        self.addLine(1, 2)
-        self.addLine(1, 3)
-        self.addAngle(2, 1, 3)
-        self.addCircle(1, 2)
-        self.addPivots(1)
-        self.addPivots(2)
-        self.updateAll()
         pass
+        # self.loadImg('path to an image file')
+        # self.addRealPoint(1, 300, 200)
+        # self.addRealPoint(2, 200, 200)
+        # self.addRealPoint(3, 300, 300)
+        # self.addLine(1, 2)
+        # self.addLine(1, 3)
+        # self.addAngle(2, 1, 3)
+        # self.addCircle(1, 2)
+        # self.addPivots(1)
+        # self.addPivots(2)
+        # self.updateAll()

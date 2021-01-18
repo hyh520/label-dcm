@@ -9,8 +9,13 @@ class Settings(object):
         self.fontFamily = 'Consolas'
 
         # Shifting
-        # 1. Index, Distance, Degree
-        self.shifting = 0.02
+        # 1. Index
+        self.indexShifting = 3
+        # 2. Distance
+        self.distanceShifting = 8
+        # 3. Degree
+        self.degreeShiftingBase = 15
+        self.degreeShiftingMore = 30
 
         # Width
         # 1. Point
@@ -62,7 +67,7 @@ class Settings(object):
     def __getattr__(self, item):
         if item in self.__dict__:
             return self.item
-        return None
+        raise self.ScopeException
 
 
 settings = Settings()
