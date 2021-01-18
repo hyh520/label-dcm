@@ -175,3 +175,7 @@ def getFootPoint(A: QPointF, B: QPointF, C: QPointF):
     c = -a * A.x() - b * A.y()
     return QPointF((b * b * C.x() - a * b * C.y() - a * c) / (a * a + b * b),
                    (a * a * C.y() - a * b * C.x() - b * c) / (a * a + b * b))
+
+
+def isOnSegment(A: QPointF, B: QPointF, C: QPointF):
+    return min(A.x(), B.x()) < C.x() + settings.eps and C.x() < max(A.x(), B.x()) + settings.eps

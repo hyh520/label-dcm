@@ -198,8 +198,9 @@ class LabelApp(QWidget, Ui_Form):
             font.setPointSizeF(settings.fontSize)
         painter.setFont(font)
         for (indexA, indexB), color in self.lines.items():
-            pen.setColor(QColor.lighter(color) if indexA in self.highlightPoints and indexB in self.highlightPoints
-                         else color)
+            isHighlight = indexA in self.highlightPoints and indexB in self.highlightPoints \
+                          and (self.mode == LabelMode.AngleMode or self.mode == LabelMode.VerticalMode)
+            pen.setColor(QColor.lighter(color) if isHighlight else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
             B = self.points[indexB][0]
@@ -265,8 +266,9 @@ class LabelApp(QWidget, Ui_Form):
         pen.setCapStyle(Qt.RoundCap)
         pen.setWidthF(settings.lineWidth if not toSrc else settings.lineWidth * self.ratioToSrc)
         for (indexA, indexB), color in self.circles.items():
-            pen.setColor(QColor.lighter(color) if indexA in self.highlightPoints and indexB in self.highlightPoints
-                         else color)
+            isHighlight = indexA in self.highlightPoints and indexB in self.highlightPoints \
+                          and self.mode == LabelMode.CircleMode
+            pen.setColor(QColor.lighter(color) if isHighlight else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
             B = self.points[indexB][0]
@@ -574,8 +576,9 @@ class LabelApp(QWidget, Ui_Form):
             else:
                 D = Static.getFootPoint(A, B, C)
                 indexD = self.addPoint(D)
-                self.addLine((self.indexA if Static.getDistance(A, D) < Static.getDistance(B, D) else self.indexB),
-                             indexD)
+                if not Static.isOnSegment(A, B, D):
+                    self.addLine((self.indexA if Static.getDistance(A, D) < Static.getDistance(B, D) else self.indexB),
+                                 indexD)
                 self.addLine(self.indexC, indexD)
                 self.endTriggerWith(self.indexC)
 
