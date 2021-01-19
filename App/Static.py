@@ -1,6 +1,9 @@
-import math
 from App.Settings import settings
+import math
+import numpy
 import os
+from PIL import Image
+from pydicom import dcmread
 from PyQt5.QtCore import QPointF, QRectF
 
 
@@ -124,9 +127,6 @@ def isImgAccess(imgDir: str):
 # Value_n
 #
 def getDcmImgAndMdInfo(imgDir: str):
-    import numpy
-    from PIL import Image
-    from pydicom import dcmread
     dcm = dcmread(imgDir)
     low = numpy.min(dcm.pixel_array)
     upp = numpy.max(dcm.pixel_array)
