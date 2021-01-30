@@ -1,12 +1,9 @@
 from enum import Enum
 
-
 class LabelMode(Enum):
     DragMode = 0
-
     # DefaultMode = DragMode
     DefaultMode = 0
-
     PointMode = 1
     LineMode = 2
     AngleMode = 3

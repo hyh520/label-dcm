@@ -1,4 +1,4 @@
-class Settings(object):
+class Config:
     def __init__(self):
         # Font Size
         # 1. Index, Distance, Degree
@@ -69,5 +69,4 @@ class Settings(object):
             return self.item
         raise self.ScopeException
 
-
-settings = Settings()
+config = Config()

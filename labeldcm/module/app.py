@@ -1,20 +1,19 @@
-from App import Static
-from App.LabelMode import LabelMode
-from App.Settings import settings
-from App.UiForm import Ui_Form
+from labeldcm.ui.UiForm import Ui_Form
+from labeldcm.module.config import config
+from labeldcm.module import static
+from labeldcm.module.mode import LabelMode
 from PyQt5.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
 from PyQt5.QtGui import QColor, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap, QResizeEvent
 from PyQt5.QtWidgets import QAction, QFileDialog, QGraphicsScene, QInputDialog, QMessageBox, QMenu, QWidget
 from typing import Dict, Optional, Tuple, Set
-
 
 class LabelApp(QWidget, Ui_Form):
     def initColorList(self):
         size = self.colorList.iconSize()
         index = 0
         defaultIndex = -1
-        for color in settings.colorList:
-            if color == settings.defaultColor:
+        for color in config.colorList:
+            if color == config.defaultColor:
                 defaultIndex = index
             colorIcon = QPixmap(size)
             colorIcon.fill(QColor(color))
@@ -62,7 +61,7 @@ class LabelApp(QWidget, Ui_Form):
         self.mode = LabelMode.DefaultMode
 
         # Init Color
-        self.color = QColor(settings.defaultColor)
+        self.color = QColor(config.defaultColor)
 
         # Init Image
         self.src: Optional[QPixmap] = None
@@ -94,7 +93,7 @@ class LabelApp(QWidget, Ui_Form):
         self.highlightMoveIndex = -1
         self.highlightPoints: Set[int] = set()
 
-        if settings.debug:
+        if config.debug:
             self.test()
 
     def initImg(self):
@@ -133,8 +132,9 @@ class LabelApp(QWidget, Ui_Form):
             self.initImg()
             return None
         old = self.img if self.img else self.src
-        size = QSize(self.imgView.width() - 2 * self.imgView.lineWidth(),
-                     self.imgView.height() - 2 * self.imgView.lineWidth())
+        size = QSize(
+            self.imgView.width() - 2 * self.imgView.lineWidth(), self.imgView.height() - 2 * self.imgView.lineWidth()
+        )
         self.img = self.src.scaled(size, Qt.KeepAspectRatio)
         self.ratioFromOld = self.img.width() / old.width()
         self.ratioToSrc = self.src.width() / self.img.width()
@@ -161,11 +161,11 @@ class LabelApp(QWidget, Ui_Form):
         pen.setCapStyle(Qt.RoundCap)
         font = QFont('Consolas')
         if toSrc:
-            pen.setWidthF(settings.pointWidth * self.ratioToSrc)
-            font.setPointSizeF(settings.fontSize * self.ratioToSrc)
+            pen.setWidthF(config.pointWidth * self.ratioToSrc)
+            font.setPointSizeF(config.fontSize * self.ratioToSrc)
         else:
-            pen.setWidthF(settings.pointWidth)
-            font.setPointSizeF(settings.fontSize)
+            pen.setWidthF(config.pointWidth)
+            font.setPointSizeF(config.fontSize)
         painter.setFont(font)
         for index, (point, color) in self.points.items():
             labelPoint: QPointF
@@ -173,12 +173,14 @@ class LabelApp(QWidget, Ui_Form):
                 pen.setColor(color)
                 labelPoint = self.getSrcPoint(point)
             else:
-                pen.setColor(color if index != self.highlightMoveIndex and index not in self.highlightPoints
-                             else QColor.lighter(color))
+                pen.setColor(
+                    color if index != self.highlightMoveIndex and index not in self.highlightPoints
+                    else QColor.lighter(color)
+                )
                 labelPoint = point
             painter.setPen(pen)
             painter.drawPoint(labelPoint)
-            painter.drawText(Static.getIndexShift(labelPoint), str(index))
+            painter.drawText(static.getIndexShift(labelPoint), str(index))
         painter.end()
 
     def labelLines(self, img: Optional[QPixmap], toSrc: bool):
@@ -191,15 +193,15 @@ class LabelApp(QWidget, Ui_Form):
         pen.setCapStyle(Qt.RoundCap)
         font = QFont('Consolas')
         if toSrc:
-            pen.setWidthF(settings.lineWidth * self.ratioToSrc)
-            font.setPointSizeF(settings.fontSize * self.ratioToSrc)
+            pen.setWidthF(config.lineWidth * self.ratioToSrc)
+            font.setPointSizeF(config.fontSize * self.ratioToSrc)
         else:
-            pen.setWidthF(settings.lineWidth)
-            font.setPointSizeF(settings.fontSize)
+            pen.setWidthF(config.lineWidth)
+            font.setPointSizeF(config.fontSize)
         painter.setFont(font)
         for (indexA, indexB), color in self.lines.items():
             isHighlight = indexA in self.highlightPoints and indexB in self.highlightPoints \
-                          and (self.mode == LabelMode.AngleMode or self.mode == LabelMode.VerticalMode)
+                and (self.mode == LabelMode.AngleMode or self.mode == LabelMode.VerticalMode)
             pen.setColor(QColor.lighter(color) if isHighlight else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
@@ -209,11 +211,11 @@ class LabelApp(QWidget, Ui_Form):
             labelPoint: QPointF
             if toSrc:
                 painter.drawLine(srcA, srcB)
-                labelPoint = Static.getMidpoint(srcA, srcB)
+                labelPoint = static.getMidpoint(srcA, srcB)
             else:
                 painter.drawLine(A, B)
-                labelPoint = Static.getMidpoint(A, B)
-            painter.drawText(Static.getDistanceShift(A, B, labelPoint), str(round(Static.getDistance(srcA, srcB), 2)))
+                labelPoint = static.getMidpoint(A, B)
+            painter.drawText(static.getDistanceShift(A, B, labelPoint), str(round(static.getDistance(srcA, srcB), 2)))
         painter.end()
 
     def labelAngles(self, img: Optional[QPixmap], toSrc: bool):
@@ -226,11 +228,11 @@ class LabelApp(QWidget, Ui_Form):
         pen.setCapStyle(Qt.RoundCap)
         font = QFont('Consolas')
         if toSrc:
-            pen.setWidthF(settings.angleWidth * self.ratioToSrc)
-            font.setPointSizeF(settings.fontSize * self.ratioToSrc)
+            pen.setWidthF(config.angleWidth * self.ratioToSrc)
+            font.setPointSizeF(config.fontSize * self.ratioToSrc)
         else:
-            pen.setWidthF(settings.angleWidth)
-            font.setPointSizeF(settings.fontSize)
+            pen.setWidthF(config.angleWidth)
+            font.setPointSizeF(config.fontSize)
         painter.setFont(font)
         for (indexA, indexB, indexC), color in self.angles.items():
             pen.setColor(color)
@@ -238,8 +240,8 @@ class LabelApp(QWidget, Ui_Form):
             A = self.points[indexA][0]
             B = self.points[indexB][0]
             C = self.points[indexC][0]
-            D, E = Static.getDiagPoints(self.points[indexA][0], B, C)
-            F = Static.getArcMidpoint(A, B, C)
+            D, E = static.getDiagPoints(self.points[indexA][0], B, C)
+            F = static.getArcMidpoint(A, B, C)
             labelRect: QRectF
             labelPointA: QPointF
             labelPointB: QPointF
@@ -251,9 +253,9 @@ class LabelApp(QWidget, Ui_Form):
                 labelRect = QRectF(D, E)
                 labelPointA = B
                 labelPointB = F
-            deg = Static.getDegree(A, B, C)
-            painter.drawArc(labelRect, int(Static.getBeginDegree(A, B, C) * 16), int(deg * 16))
-            painter.drawText(Static.getDegreeShift(labelPointA, labelPointB), str(round(deg, 2)) + '°')
+            deg = static.getDegree(A, B, C)
+            painter.drawArc(labelRect, int(static.getBeginDegree(A, B, C) * 16), int(deg * 16))
+            painter.drawText(static.getDegreeShift(labelPointA, labelPointB), str(round(deg, 2)) + '°')
         painter.end()
 
     def labelCircles(self, img: Optional[QPixmap], toSrc: bool):
@@ -264,16 +266,18 @@ class LabelApp(QWidget, Ui_Form):
         painter.setRenderHint(QPainter.Antialiasing, True)
         pen = QPen()
         pen.setCapStyle(Qt.RoundCap)
-        pen.setWidthF(settings.lineWidth if not toSrc else settings.lineWidth * self.ratioToSrc)
+        pen.setWidthF(config.lineWidth if not toSrc else config.lineWidth * self.ratioToSrc)
         for (indexA, indexB), color in self.circles.items():
             isHighlight = indexA in self.highlightPoints and indexB in self.highlightPoints \
-                          and self.mode == LabelMode.CircleMode
+                and self.mode == LabelMode.CircleMode
             pen.setColor(QColor.lighter(color) if isHighlight else color)
             painter.setPen(pen)
             A = self.points[indexA][0]
             B = self.points[indexB][0]
-            painter.drawEllipse(Static.getMinBoundingRect(A, B) if not toSrc
-                                else Static.getMinBoundingRect(self.getSrcPoint(A), self.getSrcPoint(B)))
+            painter.drawEllipse(
+                static.getMinBoundingRect(A, B) if not toSrc
+                else static.getMinBoundingRect(self.getSrcPoint(A), self.getSrcPoint(B))
+            )
         painter.end()
 
     def updateLabels(self, img: Optional[QPixmap], toSrc: bool):
@@ -343,8 +347,8 @@ class LabelApp(QWidget, Ui_Form):
 
     # DICOM (*.dcm)
     def loadDcmImg(self, imgDir: str):
-        if Static.isImgAccess(imgDir):
-            self.src, mdInfo = Static.getDcmImgAndMdInfo(imgDir)
+        if static.isImgAccess(imgDir):
+            self.src, mdInfo = static.getDcmImgAndMdInfo(imgDir)
             self.patientInfo.setMarkdown(mdInfo)
             self.updateAll()
         else:
@@ -352,7 +356,7 @@ class LabelApp(QWidget, Ui_Form):
 
     # JPEG (*.jpg;*.jpeg;*.jpe), PNG (*.png)
     def loadImg(self, imgDir: str):
-        if Static.isImgAccess(imgDir):
+        if static.isImgAccess(imgDir):
             self.src = QPixmap()
             self.src.load(imgDir)
             self.updateAll()
@@ -363,7 +367,7 @@ class LabelApp(QWidget, Ui_Form):
         caption = 'Open Image File'
         extFilter = 'DICOM (*.dcm);;JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
         dcmFilter = 'DICOM (*.dcm)'
-        imgDir, imgExt = QFileDialog.getOpenFileName(self, caption, Static.getHomeImgDir(), extFilter, dcmFilter)
+        imgDir, imgExt = QFileDialog.getOpenFileName(self, caption, static.getHomeImgDir(), extFilter, dcmFilter)
         if not imgDir:
             return None
         self.initAll()
@@ -381,7 +385,7 @@ class LabelApp(QWidget, Ui_Form):
         caption = 'Save Image File'
         extFilter = 'JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
         initFilter = 'JPEG (*.jpg;*.jpeg;*.jpe)'
-        imgDir, _ = QFileDialog.getSaveFileName(self, caption, Static.getHomeImgDir(), extFilter, initFilter)
+        imgDir, _ = QFileDialog.getSaveFileName(self, caption, static.getHomeImgDir(), extFilter, initFilter)
         if imgDir:
             img.save(imgDir)
 
@@ -414,7 +418,7 @@ class LabelApp(QWidget, Ui_Form):
         self.mode = mode if self.mode != mode else LabelMode.DefaultMode
 
     def changeColor(self):
-        self.color = QColor(settings.colorList[self.colorList.currentIndex()])
+        self.color = QColor(config.colorList[self.colorList.currentIndex()])
 
     def clearLabels(self):
         self.initExceptImg()
@@ -423,19 +427,19 @@ class LabelApp(QWidget, Ui_Form):
     def getPointIndex(self, point: QPointF):
         if not self.img or not self.points:
             return -1
-        distance = settings.pointWidth - settings.eps
+        distance = config.pointWidth - config.eps
         # Index -1 means the point does not exist
         index = -1
         for idx, (pt, _) in self.points.items():
-            dis = Static.getDistance(point, pt)
+            dis = static.getDistance(point, pt)
             if dis < distance:
                 distance = dis
                 index = idx
         return index
 
     def isPointOutOfBound(self, point: QPointF):
-        return point.x() < settings.pointWidth / 2 or point.x() > self.img.width() - settings.pointWidth / 2 or \
-               point.y() < settings.pointWidth / 2 or point.y() > self.img.height() - settings.pointWidth / 2
+        return point.x() < config.pointWidth / 2 or point.x() > self.img.width() - config.pointWidth / 2 \
+               or point.y() < config.pointWidth / 2 or point.y() > self.img.height() - config.pointWidth / 2
 
     def getIndexCnt(self):
         return len([i for i in [self.indexA, self.indexB, self.indexC] if i != -1])
@@ -475,12 +479,12 @@ class LabelApp(QWidget, Ui_Form):
 
     def addLine(self, indexA: int, indexB: int):
         if self.img and indexA in self.points and indexB in self.points:
-            self.lines[Static.getLineKey(indexA, indexB)] = self.color
+            self.lines[static.getLineKey(indexA, indexB)] = self.color
 
     def addAngle(self, indexA: int, indexB: int, indexC: int):
-        if self.img and Static.getLineKey(indexA, indexB) in self.lines \
-                and Static.getLineKey(indexB, indexC) in self.lines:
-            self.angles[Static.getAngleKey(indexA, indexB, indexC)] = self.color
+        if self.img and static.getLineKey(indexA, indexB) in self.lines \
+                and static.getLineKey(indexB, indexC) in self.lines:
+            self.angles[static.getAngleKey(indexA, indexB, indexC)] = self.color
 
     def addCircle(self, indexA: int, indexB: int):
         if self.img and indexA in self.points and indexB in self.points:
@@ -518,10 +522,10 @@ class LabelApp(QWidget, Ui_Form):
         if evt.type() != QMouseEvent.MouseButtonPress:
             return None
         self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
-        if self.getIndexCnt() == 2 and Static.getLineKey(self.indexA, self.indexB) not in self.lines:
+        if self.getIndexCnt() == 2 and static.getLineKey(self.indexA, self.indexB) not in self.lines:
             self.triggerIndex(self.indexA)
         elif self.getIndexCnt() == 3:
-            if Static.getLineKey(self.indexB, self.indexC) in self.lines:
+            if static.getLineKey(self.indexB, self.indexC) in self.lines:
                 self.addAngle(self.indexA, self.indexB, self.indexC)
                 self.endTriggerWith(self.indexC)
             else:
@@ -534,7 +538,7 @@ class LabelApp(QWidget, Ui_Form):
         if evt.type() == QMouseEvent.MouseButtonPress:
             if self.getIndexCnt() == 0:
                 self.triggerIndex(self.addPoint(point))
-                self.triggerIndex(self.addPoint(QPointF(point.x() + 2 * settings.eps, point.y() + 2 * settings.eps)))
+                self.triggerIndex(self.addPoint(QPointF(point.x() + 2 * config.eps, point.y() + 2 * config.eps)))
                 self.addCircle(self.indexA, self.indexB)
             elif self.getIndexCnt() == 2:
                 self.endTriggerWith(self.indexB)
@@ -547,10 +551,10 @@ class LabelApp(QWidget, Ui_Form):
             return None
         self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
         if self.getIndexCnt() == 2:
-            if Static.getLineKey(self.indexA, self.indexB) in self.lines:
+            if static.getLineKey(self.indexA, self.indexB) in self.lines:
                 A = self.points[self.indexA][0]
                 B = self.points[self.indexB][0]
-                self.addPoint(Static.getMidpoint(A, B))
+                self.addPoint(static.getMidpoint(A, B))
                 self.endTriggerWith(self.indexB)
             else:
                 self.triggerIndex(self.indexA)
@@ -560,24 +564,24 @@ class LabelApp(QWidget, Ui_Form):
             return None
         self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
         if self.getIndexCnt() == 2:
-            if Static.getLineKey(self.indexA, self.indexB) not in self.lines:
+            if static.getLineKey(self.indexA, self.indexB) not in self.lines:
                 self.triggerIndex(self.indexA)
         elif self.getIndexCnt() == 3:
             A = self.points[self.indexA][0]
             B = self.points[self.indexB][0]
             C = self.points[self.indexC][0]
-            if Static.isOnALine(A, B, C):
-                if Static.getLineKey(self.indexB, self.indexC) in self.lines:
+            if static.isOnALine(A, B, C):
+                if static.getLineKey(self.indexB, self.indexC) in self.lines:
                     self.triggerIndex(self.indexA)
                 else:
                     indexC = self.indexC
                     self.endTrigger()
                     self.triggerIndex(indexC)
             else:
-                D = Static.getFootPoint(A, B, C)
+                D = static.getFootPoint(A, B, C)
                 indexD = self.addPoint(D)
-                if not Static.isOnSegment(A, B, D):
-                    self.addLine((self.indexA if Static.getDistance(A, D) < Static.getDistance(B, D) else self.indexB),
+                if not static.isOnSegment(A, B, D):
+                    self.addLine((self.indexA if static.getDistance(A, D) < static.getDistance(B, D) else self.indexB),
                                  indexD)
                 self.addLine(self.indexC, indexD)
                 self.endTriggerWith(self.indexC)
@@ -587,7 +591,8 @@ class LabelApp(QWidget, Ui_Form):
         self.updateAll()
 
     def modifyIndex(self, index: int):
-        newIndex, modify = QInputDialog.getInt(self, 'Modify Index', 'Please input a natural number.', index, 0, step=1)
+        newIndex, modify = QInputDialog.getInt(self,
+            'Modify Index', 'Please input a natural number.', index, 0, step=1)
         if not modify or newIndex == index:
             return None
         if newIndex in self.points:
@@ -598,7 +603,7 @@ class LabelApp(QWidget, Ui_Form):
         for line in list(self.lines.keys()):
             if index in line:
                 fixedIndex = line[0] + line[1] - index
-                self.lines[Static.getLineKey(newIndex, fixedIndex)] = self.lines[line]
+                self.lines[static.getLineKey(newIndex, fixedIndex)] = self.lines[line]
                 del self.lines[line]
         for angle in list(self.angles.keys()):
             if index in angle:
@@ -606,7 +611,7 @@ class LabelApp(QWidget, Ui_Form):
                     self.angles[angle[0], newIndex, angle[2]] = self.angles[angle]
                 else:
                     fixedIndex = angle[0] + angle[2] - index
-                    self.angles[Static.getAngleKey(newIndex, angle[1], fixedIndex)] = self.angles[angle]
+                    self.angles[static.getAngleKey(newIndex, angle[1], fixedIndex)] = self.angles[angle]
                 del self.angles[angle]
         for circle in list(self.circles.keys()):
             if index in circle:
