@@ -1,4 +1,4 @@
-if __name__ == '__main__':
+if __name__ == "__main__":
     from labeldcm.module.app import LabelApp
     from PyQt5.QtWidgets import QApplication
     import sys

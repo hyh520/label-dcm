@@ -1,4 +1,4 @@
-class Config:
+class Config(object):
     def __init__(self):
         # Font Size
         # 1. Index, Distance, Degree
@@ -53,11 +53,9 @@ class Config:
         # Debug
         self.debug = True
 
-    class ConstException(Exception):
-        pass
-
-    class ScopeException(Exception):
-        pass
+        # 操作列表
+        self.defaultAction = '无操作'
+        self.actionList = ['无操作', '点', '线', '角度', '圆', '中点', '直角', '移动点', '删除点']
 
     def __setattr__(self, key, value):
         if key in self.__dict__:

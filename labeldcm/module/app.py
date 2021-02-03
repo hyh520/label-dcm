@@ -1,73 +1,42 @@
 from labeldcm.module import static
 from labeldcm.module.config import config
 from labeldcm.module.mode import LabelMode
-from labeldcm.ui.UiForm import Ui_Form
-from PyQt5.QtCore import pyqtBoundSignal, QEvent, QObject, QPointF, QRectF, QSize, Qt
+from labeldcm.ui.form import Ui_Form
+from PyQt5.QtCore import pyqtBoundSignal, QCoreApplication, QEvent, QObject, QPointF, QRectF, QSize, Qt
 from PyQt5.QtGui import QColor, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap, QResizeEvent
-from PyQt5.QtWidgets import QAction, QFileDialog, QGraphicsScene, QInputDialog,QMenu, QMessageBox, QWidget
+from PyQt5.QtWidgets import QAction, QFileDialog, QGraphicsScene, QInputDialog, \
+    QMainWindow, QMenu, QMessageBox, QStatusBar
 from typing import Dict, Optional, Set, Tuple
 
-class LabelApp(QWidget, Ui_Form):
-    def initColorList(self):
-        size = self.colorList.iconSize()
-        index = 0
-        defaultIndex = -1
-        for color in config.colorList:
-            if color == config.defaultColor:
-                defaultIndex = index
-            colorIcon = QPixmap(size)
-            colorIcon.fill(QColor(color))
-            self.colorList.addItem(QIcon(colorIcon), color.capitalize())
-            index += 1
-        self.colorList.setCurrentIndex(defaultIndex)
-
-    # TODO: Init UI style
-    def initUIStyle(self):
-        pass
-        # Example
-        # self.setWindowTitle('LabelDcm')
-        # self.setStyleSheet('QWidget { color: gray }')
-
-    def initEventConnections(self):
-        self.imgView.viewport().installEventFilter(self)
-        self.uploadBtn.clicked.connect(self.uploadImg)
-        self.saveBtn.clicked.connect(self.saveImg)
-        self.initBtn.clicked.connect(self.initImgWithPoints)
-        self.pointBtn.clicked.connect(lambda: self.toMode(LabelMode.PointMode))
-        self.lineBtn.clicked.connect(lambda: self.toMode(LabelMode.LineMode))
-        self.angleBtn.clicked.connect(lambda: self.toMode(LabelMode.AngleMode))
-        self.circleBtn.clicked.connect(lambda: self.toMode(LabelMode.CircleMode))
-        self.midpointBtn.clicked.connect(lambda: self.toMode(LabelMode.MidpointMode))
-        self.verticalBtn.clicked.connect(lambda: self.toMode(LabelMode.VerticalMode))
-        self.colorList.currentIndexChanged.connect(self.changeColor)
-        self.clearBtn.clicked.connect(self.clearLabels)
-
+class LabelApp(QMainWindow, Ui_Form):
     def __init__(self):
-        # Init UI
         super(LabelApp, self).__init__()
         self.setupUi(self)
         self.retranslateUi(self)
-        self.initColorList()
-        self.initUIStyle()
 
-        # Init Right Button Menu
-        self.rightBtnMenu = QMenu(self)
+        # qss设置
+        with open('labeldcm/assets/style.qss', 'r', encoding='utf-8') as f:
+            self.setStyleSheet(f.read())
 
-        # Init Event
-        self.targetEventType = [QMouseEvent.MouseButtonPress, QMouseEvent.MouseMove, QMouseEvent.MouseButtonRelease]
-        self.initEventConnections()
-
-        # Init Label Mode
-        self.mode = LabelMode.DefaultMode
-
-        # Init Color
+        # 初始化颜色单选框
+        self.initColorBox()
         self.color = QColor(config.defaultColor)
 
-        # Init Image
+        # 初始化操作单选框
+        self.initActionBox()
+        self.mode = LabelMode.DefaultMode
+
+        # 图片比例，初始100%
+        self.imgSize = 1
+
+        # 初始化画布，原图，现图，现图/原图，原图/现图
         self.src: Optional[QPixmap] = None
         self.img: Optional[QPixmap] = None
         self.ratioFromOld = 1
         self.ratioToSrc = 1
+
+        self.targetEventType = [QMouseEvent.MouseButtonPress, QMouseEvent.MouseMove, QMouseEvent.MouseButtonRelease]
+        self.initEventConnections()
 
         # Init Index
         self.indexA = -1
@@ -89,19 +58,202 @@ class LabelApp(QWidget, Ui_Form):
         # Init Pivots
         self.pivots: Set[int] = set()
 
-        # Init Highlight
+        # Init Highlight 选中的点
         self.highlightMoveIndex = -1
         self.highlightPoints: Set[int] = set()
 
-        if config.debug:
-            self.test()
+        # Init Right Button Menu
+        self.rightBtnMenu = QMenu(self)
 
+        # 状态栏
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+
+    # 绑定事件
+    def initEventConnections(self):
+        self.imgView.viewport().installEventFilter(self)
+        self.loadImgBtn.triggered.connect(self.uploadImg)
+        self.storeImgBtn.triggered.connect(self.saveImg)
+        self.colorBox.currentIndexChanged.connect(self.changeColor)
+        self.actionBox.currentIndexChanged.connect(self.changeMode)
+        self.imgSizeSlider.valueChanged.connect(self.changeImgSizeSlider)
+        self.clearAllBtn.triggered.connect(self.initImgWithPoints)
+        self.deleteImgBtn.triggered.connect(self.clearImg)
+        self.addSizeBtn.triggered.connect(self.addImgSize)
+        self.subSizeBtn.triggered.connect(self.subImgSize)
+        self.originalSizeBtn.triggered.connect(self.originalImgSize)
+        self.quitAppBtn.triggered.connect(QCoreApplication.instance().quit)
+        self.aiBtn.triggered.connect(self.aiPoint)
+
+    # 更新关键点信息
+    def updatePivotsInfo(self):
+        if not self.img or not self.points or not self.pivots:
+            self.pivotsInfo.setMarkdown('')
+            return None
+        pivots = list(self.pivots)
+        pivots.sort()
+        mdInfo = ''
+        for index in pivots:
+            point = self.getSrcPoint(self.points[index][0])
+            mdInfo += '{}: ({}, {})\n\n'.format(index, round(point.x(), 2), round(point.y(), 2))
+        self.pivotsInfo.setMarkdown(mdInfo)
+
+    # 初始化画布
     def initImg(self):
         self.src = None
         self.img = None
         self.ratioFromOld = 1
         self.ratioToSrc = 1
         self.patientInfo.setMarkdown('')
+
+    # 更新图片,依据画布尺寸自动更新图片尺寸
+    def updateImg(self):
+        if not self.src:
+            self.initImg()
+            return None
+        old = self.img if self.img else self.src
+        size = QSize(
+            (self.imgView.width() - 2 * self.imgView.lineWidth()) * self.imgSize,
+            (self.imgView.height() - 2 * self.imgView.lineWidth()) * self.imgSize
+        )
+        self.img = self.src.scaled(size, Qt.KeepAspectRatio)
+        self.ratioFromOld = self.img.width() / old.width()
+        self.ratioToSrc = self.src.width() / self.img.width()
+
+    # 更新画布,添加图片到画布
+    def updateImgView(self):
+        scene = QGraphicsScene()
+        if self.img:
+            scene.addPixmap(self.img)
+        self.imgView.setScene(scene)
+
+    # DICOM (*.dcm),得到dicom文件的pixmap和内含信息
+    def loadDcmImg(self, imgDir: str):
+        if static.isImgAccess(imgDir):
+            self.src, mdInfo = static.getDcmImgAndMdInfo(imgDir)
+            self.patientInfo.setMarkdown(mdInfo)
+            self.updateAll()
+        else:
+            self.warning('The image file is not found or unreadable!')
+
+    # JPEG (*.jpg;*.jpeg;*.jpe), PNG (*.png)
+    def loadImg(self, imgDir: str):
+        if static.isImgAccess(imgDir):
+            self.src = QPixmap()
+            self.src.load(imgDir)
+            self.updateAll()
+        else:
+            self.warning('The image file is not found or unreadable!')
+
+    # 上传图片到画布
+    def uploadImg(self):
+        caption = 'Open Image File'
+        extFilter = 'DICOM (*.dcm);;JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
+        dcmFilter = 'DICOM (*.dcm)'
+        imgDir, imgExt = QFileDialog.getOpenFileName(self, caption, static.getHomeImgDir(), extFilter, dcmFilter)
+        if not imgDir:
+            return None
+        self.initAll()
+        if imgExt == dcmFilter:
+            self.loadDcmImg(imgDir)
+        else:
+            self.loadImg(imgDir)
+
+    # 保存结果
+    def saveImg(self):
+        if not self.src:
+            self.warning('Please upload an image file first!')
+        img = self.src.copy()
+        self.eraseHighlight()
+        self.updateLabels(img, True)
+        caption = 'Save Image File'
+        extFilter = 'JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
+        initFilter = 'JPEG (*.jpg;*.jpeg;*.jpe)'
+        imgDir, _ = QFileDialog.getSaveFileName(self, caption, static.getHomeImgDir(), extFilter, initFilter)
+        if imgDir:
+            img.save(imgDir)
+
+    # 初始化颜色单选框
+    def initColorBox(self):
+        size = self.colorBox.iconSize()
+        index = 0
+        defaultIndex = -1
+        for color in config.colorList:
+            if color == config.defaultColor:
+                defaultIndex = index
+            colorIcon = QPixmap(size)
+            colorIcon.fill(QColor(color))
+            self.colorBox.addItem(QIcon(colorIcon), f'  {color.capitalize()}')
+            index += 1
+        self.colorBox.setCurrentIndex(defaultIndex)
+
+    # 初始化操作单选框
+    def initActionBox(self):
+        index = 0
+        defaultIndex = -1
+        for action in config.actionList:
+            if action == config.defaultAction:
+                defaultIndex = index
+            self.actionBox.addItem(f'    {action}')
+            index += 1
+        self.actionBox.setCurrentIndex(defaultIndex)
+
+    # 改变滑块
+    def changeImgSizeSlider(self):
+        size = self.imgSizeSlider.value()
+        self.imgSize = size / 100
+        self.imgSizeLabel.setText(f'大小：{size}%')
+        self.updateAll()
+
+    def addImgSize(self):
+        size = min(int(self.imgSize * 100 + 10), 200)
+        self.imgSizeSlider.setValue(size)
+        self.imgSize = size / 100
+        self.imgSizeLabel.setText(f'大小：{size}%')
+        self.updateAll()
+
+    def subImgSize(self):
+        size = max(int(self.imgSize * 100 - 10), 50)
+        self.imgSizeSlider.setValue(size)
+        self.imgSize = size / 100
+        self.imgSizeLabel.setText(f'大小：{size}%')
+        self.updateAll()
+
+    def originalImgSize(self):
+        size = 100
+        self.imgSizeSlider.setValue(size)
+        self.imgSize = size / 100
+        self.imgSizeLabel.setText(f'大小：{size}%')
+        self.updateAll()
+
+    # 改变颜色
+    def changeColor(self):
+        self.color = QColor(config.colorList[self.colorBox.currentIndex()])
+
+    # 改变状态
+    def changeMode(self):
+        self.eraseHighlight()
+        text = config.actionList[self.actionBox.currentIndex()]
+        mode: LabelMode
+        if text == '点':
+            mode = LabelMode.PointMode
+        elif text == '线':
+            mode = LabelMode.LineMode
+        elif text == '角度':
+            mode = LabelMode.AngleMode
+        elif text == '圆':
+            mode = LabelMode.CircleMode
+        elif text == '中点':
+            mode = LabelMode.MidpointMode
+        elif text == '直角':
+            mode = LabelMode.VerticalMode
+        elif text == '移动点':
+            mode = LabelMode.MovePointMode
+        elif text == '删除点':
+            mode = LabelMode.ClearPointMode
+        else:
+            mode = LabelMode.DefaultMode
+        self.mode = mode
 
     def initIndex(self):
         self.indexA = -1
@@ -112,6 +264,7 @@ class LabelApp(QWidget, Ui_Form):
         self.highlightMoveIndex = -1
         self.highlightPoints.clear()
 
+    # 清除点，线，角度，圆，中点，高
     def initExceptImg(self):
         self.initIndex()
         self.points.clear()
@@ -121,25 +274,7 @@ class LabelApp(QWidget, Ui_Form):
         self.pivots.clear()
         self.initHighlight()
 
-    # Except UI, Event, Label Mode, Color
-    def initAll(self):
-        self.initImg()
-        self.initExceptImg()
-
-    # Update based on source
-    def updateImg(self):
-        if not self.src:
-            self.initImg()
-            return None
-        old = self.img if self.img else self.src
-        size = QSize(
-            self.imgView.width() - 2 * self.imgView.lineWidth(), self.imgView.height() - 2 * self.imgView.lineWidth()
-        )
-        self.img = self.src.scaled(size, Qt.KeepAspectRatio)
-        self.ratioFromOld = self.img.width() / old.width()
-        self.ratioToSrc = self.src.width() / self.img.width()
-
-    # Update based on resize event
+    # 更新点位置
     def updatePoints(self):
         if not self.img or not self.points or self.ratioFromOld == 1:
             return None
@@ -148,9 +283,11 @@ class LabelApp(QWidget, Ui_Form):
             point.setY(point.y() * self.ratioFromOld)
         self.ratioFromOld = 1
 
+    # 对应原图点位置
     def getSrcPoint(self, point: QPointF):
         return QPointF(point.x() * self.ratioToSrc, point.y() * self.ratioToSrc)
 
+    # 绘点
     def labelPoints(self, img: Optional[QPixmap], toSrc: bool):
         if not img or not self.points:
             return None
@@ -183,6 +320,7 @@ class LabelApp(QWidget, Ui_Form):
             painter.drawText(static.getIndexShift(labelPoint), str(index))
         painter.end()
 
+    # 绘线
     def labelLines(self, img: Optional[QPixmap], toSrc: bool):
         if not img or not self.lines:
             return None
@@ -218,6 +356,7 @@ class LabelApp(QWidget, Ui_Form):
             painter.drawText(static.getDistanceShift(A, B, labelPoint), str(round(static.getDistance(srcA, srcB), 2)))
         painter.end()
 
+    # 绘角度
     def labelAngles(self, img: Optional[QPixmap], toSrc: bool):
         if not img or not self.angles:
             return None
@@ -258,6 +397,7 @@ class LabelApp(QWidget, Ui_Form):
             painter.drawText(static.getDegreeShift(labelPointA, labelPointB), str(round(deg, 2)) + '°')
         painter.end()
 
+    # 绘圆
     def labelCircles(self, img: Optional[QPixmap], toSrc: bool):
         if not img or not self.circles:
             return None
@@ -279,45 +419,6 @@ class LabelApp(QWidget, Ui_Form):
                 else static.getMinBoundingRect(self.getSrcPoint(A), self.getSrcPoint(B))
             )
         painter.end()
-
-    def updateLabels(self, img: Optional[QPixmap], toSrc: bool):
-        self.labelPoints(img, toSrc)
-        self.labelLines(img, toSrc)
-        self.labelAngles(img, toSrc)
-        self.labelCircles(img, toSrc)
-
-    # Update based on latest image
-    def updateImgView(self):
-        scene = QGraphicsScene()
-        if self.img:
-            scene.addPixmap(self.img)
-        self.imgView.setScene(scene)
-
-    def updatePivotsInfo(self):
-        if not self.img or not self.points or not self.pivots:
-            self.pivotsInfo.setMarkdown('')
-            return None
-        pivots = list(self.pivots)
-        pivots.sort()
-        mdInfo = ''
-        for index in pivots:
-            point = self.getSrcPoint(self.points[index][0])
-            mdInfo += str(index) + ': (' + str(round(point.x(), 2)) + ', ' + str(round(point.y(), 2)) + ')\n\n'
-        self.pivotsInfo.setMarkdown(mdInfo)
-
-    def updateAll(self):
-        # The order is immutable
-        # img -> points
-        # points -> labels, pivotsInfo
-        # labels -> imgView
-        self.updateImg()
-        self.updatePoints()
-        self.updateLabels(self.img, False)
-        self.updateImgView()
-        self.updatePivotsInfo()
-
-    def resizeEvent(self, _: QResizeEvent):
-        self.updateAll()
 
     def erasePoint(self, index):
         if index not in self.points:
@@ -342,88 +443,20 @@ class LabelApp(QWidget, Ui_Form):
         self.initHighlight()
         self.updateAll()
 
-    def warning(self, text: str):
-        QMessageBox.warning(self, 'Warning', text)
-
-    # DICOM (*.dcm)
-    def loadDcmImg(self, imgDir: str):
-        if static.isImgAccess(imgDir):
-            self.src, mdInfo = static.getDcmImgAndMdInfo(imgDir)
-            self.patientInfo.setMarkdown(mdInfo)
-            self.updateAll()
-        else:
-            self.warning('The image file is not found or unreadable!')
-
-    # JPEG (*.jpg;*.jpeg;*.jpe), PNG (*.png)
-    def loadImg(self, imgDir: str):
-        if static.isImgAccess(imgDir):
-            self.src = QPixmap()
-            self.src.load(imgDir)
-            self.updateAll()
-        else:
-            self.warning('The image file is not found or unreadable!')
-
-    def uploadImg(self):
-        caption = 'Open Image File'
-        extFilter = 'DICOM (*.dcm);;JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
-        dcmFilter = 'DICOM (*.dcm)'
-        imgDir, imgExt = QFileDialog.getOpenFileName(self, caption, static.getHomeImgDir(), extFilter, dcmFilter)
-        if not imgDir:
-            return None
-        self.initAll()
-        if imgExt == dcmFilter:
-            self.loadDcmImg(imgDir)
-        else:
-            self.loadImg(imgDir)
-
-    def saveImg(self):
-        if not self.src:
-            self.warning('Please upload an image file first!')
-        img = self.src.copy()
-        self.eraseHighlight()
-        self.updateLabels(img, True)
-        caption = 'Save Image File'
-        extFilter = 'JPEG (*.jpg;*.jpeg;*.jpe);;PNG (*.png)'
-        initFilter = 'JPEG (*.jpg;*.jpeg;*.jpe)'
-        imgDir, _ = QFileDialog.getSaveFileName(self, caption, static.getHomeImgDir(), extFilter, initFilter)
-        if imgDir:
-            img.save(imgDir)
+    def updateLabels(self, img: Optional[QPixmap], toSrc: bool):
+        self.labelPoints(img, toSrc)
+        self.labelLines(img, toSrc)
+        self.labelAngles(img, toSrc)
+        self.labelCircles(img, toSrc)
 
     def getImgPoint(self, point: QPointF):
         return QPointF(point.x() / self.ratioToSrc, point.y() / self.ratioToSrc)
 
-    def addRealPoint(self, index: int, x: float, y: float):
-        if self.img and index > -1:
-            self.points[index] = self.getImgPoint(QPointF(x, y)), self.color
-
+    # 更新标号
     def getNewIndex(self):
         return max(self.points.keys() if self.points else [0]) + 1
 
-    def addNewRealPoint(self, x: float, y: float):
-        self.addRealPoint(self.getNewIndex(), x, y)
-
-    # TODO: Init image with points
-    def initImgWithPoints(self):
-        if not self.img:
-            return None
-        self.initExceptImg()
-        # Example
-        # self.addRealPoint(1, 300, 200)
-        # self.addNewRealPoint(300, 300)
-        self.updateAll()
-
-    def toMode(self, mode: LabelMode):
-        self.eraseHighlight()
-        # Switch to mode or cancel current mode
-        self.mode = mode if self.mode != mode else LabelMode.DefaultMode
-
-    def changeColor(self):
-        self.color = QColor(config.colorList[self.colorList.currentIndex()])
-
-    def clearLabels(self):
-        self.initExceptImg()
-        self.updateAll()
-
+    # 得到point位置标号
     def getPointIndex(self, point: QPointF):
         if not self.img or not self.points:
             return -1
@@ -439,11 +472,13 @@ class LabelApp(QWidget, Ui_Form):
 
     def isPointOutOfBound(self, point: QPointF):
         return point.x() < config.pointWidth / 2 or point.x() > self.img.width() - config.pointWidth / 2 \
-               or point.y() < config.pointWidth / 2 or point.y() > self.img.height() - config.pointWidth / 2
+            or point.y() < config.pointWidth / 2 or point.y() > self.img.height() - config.pointWidth / 2
 
+    # 得到有效标号数量
     def getIndexCnt(self):
         return len([i for i in [self.indexA, self.indexB, self.indexC] if i != -1])
 
+    # 判断高亮
     def triggerIndex(self, index: int):
         if not self.img or not self.points or index == -1:
             return None
@@ -471,6 +506,7 @@ class LabelApp(QWidget, Ui_Form):
         self.endTrigger()
         self.highlightMoveIndex = index
 
+    # 添加到各个字典中
     def addPoint(self, point: QPointF):
         if self.img:
             index = self.getNewIndex()
@@ -490,16 +526,7 @@ class LabelApp(QWidget, Ui_Form):
         if self.img and indexA in self.points and indexB in self.points:
             self.circles[(indexA, indexB)] = self.color
 
-    def handleDragMode(self, evt: QMouseEvent):
-        point = self.imgView.mapToScene(evt.pos())
-        if evt.type() == QMouseEvent.MouseButtonPress and self.getIndexCnt() == 0:
-            self.triggerIndex(self.getPointIndex(point))
-        elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 1 and not self.isPointOutOfBound(point):
-            self.points[self.indexA][0].setX(point.x())
-            self.points[self.indexA][0].setY(point.y())
-        elif evt.type() == QMouseEvent.MouseButtonRelease and self.getIndexCnt() == 1:
-            self.triggerIndex(self.indexA)
-
+    # 点击事件
     def handlePointMode(self, evt: QMouseEvent):
         if evt.type() != QMouseEvent.MouseButtonPress:
             return None
@@ -509,14 +536,21 @@ class LabelApp(QWidget, Ui_Form):
             self.points[index] = self.points[index][0], self.color
         else:
             self.addPoint(point)
+        self.updateAll()
 
     def handleLineMode(self, evt: QMouseEvent):
         if evt.type() != QMouseEvent.MouseButtonPress:
             return None
-        self.triggerIndex(self.getPointIndex(self.imgView.mapToScene(evt.pos())))
+        point = self.imgView.mapToScene(evt.pos())
+        index = self.getPointIndex(point)
+        if index == -1:
+            self.triggerIndex(self.addPoint(point))
+        else:
+            self.triggerIndex(index)
         if self.getIndexCnt() == 2:
             self.addLine(self.indexA, self.indexB)
             self.endTriggerWith(self.indexB)
+        self.updateAll()
 
     def handleAngleMode(self, evt: QMouseEvent):
         if evt.type() != QMouseEvent.MouseButtonPress:
@@ -532,19 +566,37 @@ class LabelApp(QWidget, Ui_Form):
                 indexC = self.indexC
                 self.endTrigger()
                 self.triggerIndex(indexC)
+        self.updateAll()
 
     def handleCircleMode(self, evt: QMouseEvent):
         point = self.imgView.mapToScene(evt.pos())
-        if evt.type() == QMouseEvent.MouseButtonPress:
-            if self.getIndexCnt() == 0:
-                self.triggerIndex(self.addPoint(point))
-                self.triggerIndex(self.addPoint(QPointF(point.x() + 2 * config.eps, point.y() + 2 * config.eps)))
-                self.addCircle(self.indexA, self.indexB)
-            elif self.getIndexCnt() == 2:
-                self.endTriggerWith(self.indexB)
-        elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 2 and not self.isPointOutOfBound(point):
-            self.points[self.indexB][0].setX(point.x())
-            self.points[self.indexB][0].setY(point.y())
+        if self.getPointIndex(point) == -1:
+            if evt.type() == QMouseEvent.MouseButtonPress:
+                if self.getIndexCnt() == 0:
+                    self.triggerIndex(self.addPoint(point))
+                    self.triggerIndex(
+                        self.addPoint(QPointF(point.x() + 2 * config.eps, point.y() + 2 * config.eps))
+                    )
+                    self.addCircle(self.indexA, self.indexB)
+                elif self.getIndexCnt() == 2:
+                    self.endTriggerWith(self.indexB)
+            elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 2 and not self.isPointOutOfBound(point):
+                self.points[self.indexB][0].setX(point.x())
+                self.points[self.indexB][0].setY(point.y())
+        else:
+            if evt.type() == QMouseEvent.MouseButtonPress:
+                if self.getIndexCnt() == 0:
+                    self.triggerIndex(self.getPointIndex(point))
+                    self.triggerIndex(
+                        self.addPoint(QPointF(point.x() + 2 * config.eps, point.y() + 2 * config.eps))
+                    )
+                    self.addCircle(self.indexA, self.indexB)
+                elif self.getIndexCnt() == 2:
+                    self.endTriggerWith(self.indexB)
+            elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 2 and not self.isPointOutOfBound(point):
+                self.points[self.indexB][0].setX(point.x())
+                self.points[self.indexB][0].setY(point.y())
+        self.updateAll()
 
     def handleMidpointMode(self, evt: QMouseEvent):
         if evt.type() != QMouseEvent.MouseButtonPress:
@@ -554,10 +606,13 @@ class LabelApp(QWidget, Ui_Form):
             if static.getLineKey(self.indexA, self.indexB) in self.lines:
                 A = self.points[self.indexA][0]
                 B = self.points[self.indexB][0]
-                self.addPoint(static.getMidpoint(A, B))
+                indexC = self.addPoint(static.getMidpoint(A, B))
+                self.addLine(self.indexA, indexC)
+                self.addLine(self.indexB, indexC)
                 self.endTriggerWith(self.indexB)
             else:
                 self.triggerIndex(self.indexA)
+        self.updateAll()
 
     def handleVerticalMode(self, evt: QMouseEvent):
         if evt.type() != QMouseEvent.MouseButtonPress:
@@ -581,22 +636,80 @@ class LabelApp(QWidget, Ui_Form):
                 D = static.getFootPoint(A, B, C)
                 indexD = self.addPoint(D)
                 if not static.isOnSegment(A, B, D):
-                    self.addLine((self.indexA if static.getDistance(A, D) < static.getDistance(B, D) else self.indexB),
-                                 indexD)
+                    self.addLine(
+                        (self.indexA if static.getDistance(A, D) < static.getDistance(B, D) else self.indexB), indexD
+                    )
                 self.addLine(self.indexC, indexD)
                 self.endTriggerWith(self.indexC)
+            self.updateAll()
 
-    def handleHighlightMove(self, evt: QMouseEvent):
-        self.highlightMoveIndex = self.getPointIndex(self.imgView.mapToScene(evt.pos()))
+    def handleDragMode(self, evt: QMouseEvent):
+        point = self.imgView.mapToScene(evt.pos())
+        if evt.type() == QMouseEvent.MouseButtonPress and self.getIndexCnt() == 0:
+            self.triggerIndex(self.getPointIndex(point))
+        elif evt.type() == QMouseEvent.MouseMove and self.getIndexCnt() == 1 and not self.isPointOutOfBound(point):
+            self.points[self.indexA][0].setX(point.x())
+            self.points[self.indexA][0].setY(point.y())
+        elif evt.type() == QMouseEvent.MouseButtonRelease and self.getIndexCnt() == 1:
+            self.triggerIndex(self.indexA)
         self.updateAll()
 
+    def handleClearPointMode(self, evt: QMouseEvent):
+        index = self.getPointIndex(self.imgView.mapToScene(evt.pos()))
+        if evt.type() == QMouseEvent.MouseButtonPress and index != -1:
+            self.erasePoint(index)
+        self.updateAll()
+
+    def handleHighlightMove(self, evt: QMouseEvent):
+        point = self.imgView.mapToScene(evt.pos())
+        self.highlightMoveIndex = self.getPointIndex(point)
+        text = f'坐标：{round(point.x(), 2)}, {round(point.y(), 2)}'
+        self.statusBar.showMessage(text, 1000)
+        self.updateAll()
+
+    def initAll(self):
+        self.initImg()
+        self.initExceptImg()
+
+    def updateAll(self):
+        self.updateImg()
+        self.updatePoints()
+        self.updateLabels(self.img, False)
+        self.updateImgView()
+        self.updatePivotsInfo()
+
+    # 清除所有点，还原图片
+    def initImgWithPoints(self):
+        if not self.img:
+            return None
+        self.initExceptImg()
+        self.updateAll()
+
+    # 清除图片
+    def clearImg(self):
+        if not self.src:
+            return None
+        self.initAll()
+        self.updateAll()
+
+    # 自动适应窗口
+    def resizeEvent(self, _: QResizeEvent):
+        self.updateAll()
+
+    # 错误警告
+    def warning(self, text: str):
+        QMessageBox.warning(self, 'Warning', text)
+
+    # 更改标号
     def modifyIndex(self, index: int):
-        newIndex, modify = QInputDialog.getInt(self,
-            'Modify Index', 'Please input a natural number.', index, 0, step=1)
+        newIndex, modify = QInputDialog.getInt(self, '更改标号', '请输入一个新的标号', index, 0, step=1)
         if not modify or newIndex == index:
             return None
+        if newIndex <= 0:
+            self.warning('标号不可小于或等于0！')
+            return None
         if newIndex in self.points:
-            self.warning('The index already exists!')
+            self.warning('此标号已存在!')
             return None
         self.points[newIndex] = self.points[index]
         del self.points[index]
@@ -640,13 +753,13 @@ class LabelApp(QWidget, Ui_Form):
 
     def createRightBtnMenu(self, index: int, point: QPointF):
         self.rightBtnMenu = QMenu(self)
-        modifyIndex = QAction('Modify Index', self.rightBtnMenu)
+        modifyIndex = QAction('更改标号', self.rightBtnMenu)
         modifyIndexTriggered: pyqtBoundSignal = modifyIndex.triggered
         modifyIndexTriggered.connect(lambda: self.modifyIndex(index))
-        switchPivotState = QAction('Remove from pivots' if index in self.pivots else 'Add to pivots', self.rightBtnMenu)
+        switchPivotState = QAction('删除该点信息' if index in self.pivots else '查看该点信息', self.rightBtnMenu)
         switchPivotStateTriggered: pyqtBoundSignal = switchPivotState.triggered
         switchPivotStateTriggered.connect(lambda: self.switchPivotState(index))
-        erasePoint = QAction('Erase point', self.rightBtnMenu)
+        erasePoint = QAction('清除该点', self.rightBtnMenu)
         erasePointTriggered: pyqtBoundSignal = erasePoint.triggered
         erasePointTriggered.connect(lambda: self.erasePoint(index))
         self.rightBtnMenu.addAction(modifyIndex)
@@ -661,15 +774,14 @@ class LabelApp(QWidget, Ui_Form):
             self.updateAll()
             self.createRightBtnMenu(index, evt.globalPos())
             self.highlightMoveIndex = self.getPointIndex(
-                self.imgView.mapToScene(self.imgView.mapFromParent(self.mapFromParent(QCursor.pos()))))
+                self.imgView.mapToScene(self.imgView.mapFromParent(self.mapFromParent(QCursor.pos())))
+            )
             self.updateAll()
 
     def eventFilter(self, obj: QObject, evt: QEvent):
         if not self.img or obj is not self.imgView.viewport() or evt.type() not in self.targetEventType:
             return super().eventFilter(obj, evt)
-        if self.mode == LabelMode.DragMode:
-            self.handleDragMode(evt)
-        elif self.mode == LabelMode.PointMode:
+        if self.mode == LabelMode.PointMode:
             self.handlePointMode(evt)
         elif self.mode == LabelMode.LineMode:
             self.handleLineMode(evt)
@@ -681,23 +793,16 @@ class LabelApp(QWidget, Ui_Form):
             self.handleMidpointMode(evt)
         elif self.mode == LabelMode.VerticalMode:
             self.handleVerticalMode(evt)
+        elif self.mode == LabelMode.MovePointMode:
+            self.handleDragMode(evt)
+        elif self.mode == LabelMode.ClearPointMode:
+            self.handleClearPointMode(evt)
         if evt.type() == QMouseEvent.MouseMove:
             self.handleHighlightMove(evt)
         elif evt.type() == QMouseEvent.MouseButtonPress and QMouseEvent(evt).button() == Qt.RightButton:
             self.handleRightBtnMenu(evt)
         return super().eventFilter(obj, evt)
 
-    # Debug Test
-    def test(self):
+    # 自动出点
+    def aiPoint(self):
         pass
-        # self.loadImg('path to an image file')
-        # self.addRealPoint(1, 300, 200)
-        # self.addRealPoint(2, 200, 200)
-        # self.addRealPoint(3, 300, 300)
-        # self.addLine(1, 2)
-        # self.addLine(1, 3)
-        # self.addAngle(2, 1, 3)
-        # self.addCircle(1, 2)
-        # self.addPivots(1)
-        # self.addPivots(2)
-        # self.updateAll()
