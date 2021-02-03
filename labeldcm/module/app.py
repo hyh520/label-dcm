@@ -1,11 +1,11 @@
-from labeldcm.ui.UiForm import Ui_Form
-from labeldcm.module.config import config
 from labeldcm.module import static
+from labeldcm.module.config import config
 from labeldcm.module.mode import LabelMode
-from PyQt5.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
+from labeldcm.ui.UiForm import Ui_Form
+from PyQt5.QtCore import pyqtBoundSignal, QEvent, QObject, QPointF, QRectF, QSize, Qt
 from PyQt5.QtGui import QColor, QCursor, QFont, QIcon, QMouseEvent, QPainter, QPen, QPixmap, QResizeEvent
-from PyQt5.QtWidgets import QAction, QFileDialog, QGraphicsScene, QInputDialog, QMessageBox, QMenu, QWidget
-from typing import Dict, Optional, Tuple, Set
+from PyQt5.QtWidgets import QAction, QFileDialog, QGraphicsScene, QInputDialog,QMenu, QMessageBox, QWidget
+from typing import Dict, Optional, Set, Tuple
 
 class LabelApp(QWidget, Ui_Form):
     def initColorList(self):
@@ -641,11 +641,14 @@ class LabelApp(QWidget, Ui_Form):
     def createRightBtnMenu(self, index: int, point: QPointF):
         self.rightBtnMenu = QMenu(self)
         modifyIndex = QAction('Modify Index', self.rightBtnMenu)
-        modifyIndex.triggered.connect(lambda: self.modifyIndex(index))
+        modifyIndexTriggered: pyqtBoundSignal = modifyIndex.triggered
+        modifyIndexTriggered.connect(lambda: self.modifyIndex(index))
         switchPivotState = QAction('Remove from pivots' if index in self.pivots else 'Add to pivots', self.rightBtnMenu)
-        switchPivotState.triggered.connect(lambda: self.switchPivotState(index))
+        switchPivotStateTriggered: pyqtBoundSignal = switchPivotState.triggered
+        switchPivotStateTriggered.connect(lambda: self.switchPivotState(index))
         erasePoint = QAction('Erase point', self.rightBtnMenu)
-        erasePoint.triggered.connect(lambda: self.erasePoint(index))
+        erasePointTriggered: pyqtBoundSignal = erasePoint.triggered
+        erasePointTriggered.connect(lambda: self.erasePoint(index))
         self.rightBtnMenu.addAction(modifyIndex)
         self.rightBtnMenu.addAction(switchPivotState)
         self.rightBtnMenu.addAction(erasePoint)
